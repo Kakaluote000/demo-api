@@ -7,6 +7,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/kakaluote000/demo-api/pkg"
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +19,7 @@ type App struct {
 	RS     *redsync.Redsync
 	Router *gin.Engine
 	Ctx    context.Context
+	Log    *logrus.Logger
 }
 
 func NewApp() *App {
@@ -30,6 +32,7 @@ func NewApp() *App {
 		RS:     rs,
 		Router: gin.Default(),
 		Ctx:    ctx,
+		Log:    pkg.Log,
 	}
 	return GlobalApp
 }

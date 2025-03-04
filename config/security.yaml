@@ -1,0 +1,26 @@
+security:
+  jwt:
+    secret: your-secret-key-here
+    expiry: 24h
+  password:
+    min_length: 8
+    require_special: true
+    require_number: true
+    require_uppercase: true
+  rate_limit:
+    requests_per_second: 100
+    burst: 150
+  cors:
+    allowed_origins:
+      - "*"
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Origin
+      - Content-Type
+      - Accept
+      - Authorization

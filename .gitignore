@@ -1,2 +1,35 @@
 
 app.log
+# IDE
+.idea/
+.vscode/
+
+# Binary
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+
+# Test binary, built with 'go test -c'
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Environment files
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# Redis dump file
+dump.rdb

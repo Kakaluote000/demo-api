@@ -10,7 +10,9 @@ import (
 	"github.com/kakaluote000/demo-api/cmd/app"
 	"github.com/kakaluote000/demo-api/internal/models"
 	"github.com/kakaluote000/demo-api/pkg"
-
+	"github.com/kakaluote000/demo-api/pkg/auth"
+	"github.com/kakaluote000/demo-api/pkg/metrics"
+	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 )
 
@@ -18,37 +20,65 @@ var log = pkg.Log
 
 func LoggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Log the request details
 		start := time.Now()
 
 		c.Next()
 
-		end := time.Now()
-		latency := end.Sub(start)
-
-		ClientIP := c.ClientIP()
+		duration := time.Since(start)
+		statusCode := c.Writer.Status()
 		method := c.Request.Method
 		path := c.Request.URL.Path
-		statusCode := c.Writer.Status()
 
-		// 打印日志信息
-		log.Printf("LoggerMiddleware 请求日志信息 %s %s %s %d %s", ClientIP, method, path, statusCode, latency)
+		// 记录请求计数
+		metrics.RequestCounter.WithLabelValues(method, path, fmt.Sprintf("%d", statusCode)).Inc()
+
+		// 记录请求持续时间
+		metrics.RequestDuration.WithLabelValues(method, path).Observe(duration.Seconds())
+
+		// 原有的日志记录保持不变
+		log.Printf("LoggerMiddleware 请求日志信息 %s %s %s %d %s",
+			c.ClientIP(), method, path, statusCode, duration)
 	}
 }
 
+// 更新认证中间件
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if token := c.GetHeader("Authorization"); token != "valid_token" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		token := c.GetHeader("Authorization")
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "No token provided"})
 			c.Abort()
 			return
 		}
 
+		// 移除 Bearer 前缀
+		if len(token) > 7 && token[:7] == "Bearer " {
+			token = token[7:]
+		}
+
+		claims, err := auth.ParseToken(token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+
+		// 将用户信息存储在上下文中
+		c.Set("userID", claims.UserID)
 		c.Next()
-		defer func() {
-			// Log the response details
-			log.Printf("AuthMiddleware 响应日志信息 %s %s %s %d", c.ClientIP(), c.Request.Method, c.Request.URL.Path, c.Writer.Status())
-		}()
+	}
+}
+
+// 添加限流中间件
+func RateLimitMiddleware() gin.HandlerFunc {
+	limiter := rate.NewLimiter(rate.Every(time.Second), 100) // 每秒100个请求
+	return func(c *gin.Context) {
+		if !limiter.Allow() {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests"})
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 

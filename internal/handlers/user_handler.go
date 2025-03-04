@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kakaluote000/demo-api/cmd/app"
 	"github.com/kakaluote000/demo-api/internal/models"
+	"github.com/kakaluote000/demo-api/pkg/auth"
+	"github.com/kakaluote000/demo-api/pkg/security"
 	"gorm.io/gorm"
 )
 
@@ -21,15 +23,39 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+// RegisterHandler godoc
+// @Summary 用户注册
+// @Description 注册新用户
+// @Tags 用户管理
+// @Accept json
+// @Produce json
+// @Param user body models.User true "用户信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Router /register [post]
 func RegisterHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		db := app.DB
 		var user models.User
 		if err := c.ShouldBindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
+		// 验证密码强度
+		if !security.ValidatePassword(user.Password) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Password does not meet security requirements"})
+			return
+		}
+
+		// 加密密码
+		hashedPassword, err := security.HashPassword(user.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process password"})
+			return
+		}
+		user.Password = hashedPassword
+
+		db := app.DB
 		// 检查用户名是否已经存在
 		var existingUser models.User
 		if err := db.Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
@@ -46,6 +72,16 @@ func RegisterHandler(app *app.App) gin.HandlerFunc {
 	}
 }
 
+// LoginHandler godoc
+// @Summary 用户登录
+// @Description 用户登录并返回token
+// @Tags 用户管理
+// @Accept json
+// @Produce json
+// @Param user body LoginRequest true "登录信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400,401 {object} response.ErrorResponse
+// @Router /login [post]
 func LoginHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB
@@ -56,9 +92,8 @@ func LoginHandler(app *app.App) gin.HandlerFunc {
 		}
 
 		var user models.User
-		result := db.Where("username = ? AND password = ?", loginReq.Username, loginReq.Password).First(&user)
-		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
+		if err := db.Where("username = ?", loginReq.Username).First(&user).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 			} else {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
@@ -66,10 +101,44 @@ func LoginHandler(app *app.App) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
+		// 验证密码
+		if !security.CheckPasswordHash(loginReq.Password, user.Password) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+			return
+		}
+
+		// 生成 JWT token
+		token, err := auth.GenerateToken(user.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		// 将 token 存入 Redis，用于后续验证
+		tokenKey := fmt.Sprintf("user_token:%d", user.ID)
+		err = app.Redis.Set(app.Ctx, tokenKey, token, 24*time.Hour).Err()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, LoginResponse{
+			Token: token,
+		})
 	}
 }
 
+// AddUserCurrencyHandler godoc
+// @Summary 添加用户货币
+// @Description 为用户添加新的货币类型
+// @Tags 货币管理
+// @Accept json
+// @Produce json
+// @Param userCurrency body models.UserCurrency true "用户货币信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400,404,500 {object} response.ErrorResponse
+// @Security Bearer
+// @Router /userCurrency [post]
 func AddUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB
@@ -105,6 +174,17 @@ func AddUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	}
 }
 
+// GetUserCurrencyHandler godoc
+// @Summary 获取用户货币
+// @Description 获取指定用户的货币信息
+// @Tags 货币管理
+// @Accept json
+// @Produce json
+// @Param id path int true "用户ID"
+// @Success 200 {object} models.UserCurrency
+// @Failure 404,500 {object} response.ErrorResponse
+// @Security Bearer
+// @Router /userCurrency/{id} [get]
 func GetUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB
@@ -143,6 +223,17 @@ func GetUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	}
 }
 
+// UpdateUserCurrencyHandler godoc
+// @Summary 更新用户货币
+// @Description 更新用户的货币数量
+// @Tags 货币管理
+// @Accept json
+// @Produce json
+// @Param userCurrency body models.UserCurrency true "用户货币信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400,404,500 {object} response.ErrorResponse
+// @Security Bearer
+// @Router /userCurrency [put]
 func UpdateUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB
@@ -180,6 +271,17 @@ func UpdateUserCurrencyHandler(app *app.App) gin.HandlerFunc {
 	}
 }
 
+// AddCurrencyNumHandler godoc
+// @Summary 增加货币数量
+// @Description 增加用户的货币数量
+// @Tags 货币管理
+// @Accept json
+// @Produce json
+// @Param userCurrency body models.UserCurrency true "用户货币信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400,404,500 {object} response.ErrorResponse
+// @Security Bearer
+// @Router /addCurrencyNum [post]
 func AddCurrencyNumHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB
@@ -245,6 +347,17 @@ func AddCurrencyNumHandler(app *app.App) gin.HandlerFunc {
 	}
 }
 
+// SubtractCurrencyNumHandler godoc
+// @Summary 减少货币数量
+// @Description 减少用户的货币数量
+// @Tags 货币管理
+// @Accept json
+// @Produce json
+// @Param userCurrency body models.UserCurrency true "用户货币信息"
+// @Success 200 {object} response.SuccessResponse
+// @Failure 400,404,500 {object} response.ErrorResponse
+// @Security Bearer
+// @Router /subtractCurrencyNum [post]
 func SubtractCurrencyNumHandler(app *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := app.DB

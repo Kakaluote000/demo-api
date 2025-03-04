@@ -1,19 +1,38 @@
 package pkg
 
 import (
+	"time"
+
 	"github.com/kakaluote000/demo-api/internal/models"
-	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func InitDB() *gorm.DB {
-	dsn := "demo_db_user:demoAbc123@tcp(127.0.0.1:3306)/demo_db?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	dsn := GetDSN()
+	
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	
 	if err != nil {
-		logrus.Fatalf("failed to connect database: %v", err)
-		panic("failed to connect database")
+		Log.Fatalf("failed to connect database: %v", err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		Log.Fatalf("failed to get db instance: %v", err)
+	}
+
+	// 设置连接池
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	// 自动迁移
+	AutoMigrate(db)
+
 	return db
 }
 
