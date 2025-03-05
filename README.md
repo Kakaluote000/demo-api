@@ -24,7 +24,7 @@
 
 1. 克隆项目
 ```bash
-git clone https://github.com/yourusername/demo-api.git
+git clone https://github.com/Kakaluote000/demo-api.git
 cd demo-api
 ```
 go demo pai
